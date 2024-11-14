@@ -37,6 +37,14 @@ type BatchResponse struct {
 	Objects  []*BatchObjectResponse `json:"objects"`
 }
 
+func (s *Server) healthHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "OK"})
+	}
+}
+
 // BatchObjectResponse is the object item of a BatchResponse
 type BatchObjectResponse struct {
 	OID           string                                `json:"oid"`
@@ -155,6 +163,7 @@ func newServer(logger log.Logger, upstream, directory string, cacheEnabled bool)
 	} else {
 		s.mux.Handle(ContentCachePathPrefix, s.nocache())
 	}
+	s.mux.Handle("/health", s.healthHandler())
 	s.mux.Handle("/objects/batch", s.batch())
 	s.mux.Handle("/", s.proxy())
 
