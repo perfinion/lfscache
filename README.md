@@ -15,7 +15,7 @@ $ docker run --name lfscache --rm -d -v /my/cache/dir/lfs:/lfs saracen/lfscache:
 Download the correct [binary](https://github.com/saracen/lfscache/releases) for your system.
 
 ```
-$ ./lfscache --url github.com/org/repo.git/info/lfs --directory /my/cache/dir/lfs --http-addr=:9876
+$ ./lfscache --url https://github.com/org/repo.git/info/lfs --directory /my/cache/dir/lfs --http-addr=:9876
 ```
 
 `--directory` specifies the cache directory. The layout is the same used by the
