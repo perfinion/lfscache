@@ -18,13 +18,14 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/saracen/lfscache/cache"
 )
 
@@ -40,7 +41,9 @@ func (s *Server) healthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "OK"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "OK"}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}
 }
 
@@ -197,7 +200,9 @@ func (s *Server) proxy() *httputil.ReverseProxy {
 	}
 
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
-		level.Error(s.logger).Log("event", "proxying", "request", r.URL, "err", err)
+		if logErr := level.Error(s.logger).Log("event", "proxying", "request", r.URL, "err", err); logErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+		}
 	}
 
 	return &httputil.ReverseProxy{Director: director, ErrorHandler: errorHandler}
@@ -207,7 +212,9 @@ func (s *Server) batch() *httputil.ReverseProxy {
 	proxy := s.proxy()
 	proxy.ModifyResponse = func(r *http.Response) error {
 		if r.StatusCode != http.StatusOK {
-			level.Error(s.logger).Log("event", "proxying", "request", r.Request.URL, "err", fmt.Sprintf("remote server responded with %d status code", r.StatusCode))
+			if logErr := level.Error(s.logger).Log("event", "proxying", "request", r.Request.URL, "err", fmt.Sprintf("remote server responded with %d status code", r.StatusCode)); logErr != nil {
+				return logErr
+			}
 			return nil
 		}
 
@@ -323,9 +330,10 @@ func (s *Server) nocache() *httputil.ReverseProxy {
 		req.URL = originalURL
 		req.Header = header
 	}
-
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
-		level.Error(s.logger).Log("event", "proxying-no-cache", "request", r.URL, "err", err)
+		if logErr := level.Error(s.logger).Log("event", "proxying-no-cache", "request", r.URL, "err", err); logErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+		}
 	}
 
 	return &httputil.ReverseProxy{Director: director, ErrorHandler: errorHandler}
@@ -346,20 +354,32 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	level.Info(s.logger).Log("event", "serving", "oid", oid, "source", source)
+	if logErr := level.Info(s.logger).Log("event", "serving", "oid", oid, "source", source); logErr != nil {
+		fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+	}
 	defer func() {
 		logger := log.With(s.logger, "event", "served", "oid", oid, "source", source, "took", time.Since(begin))
 		if err != nil {
-			level.Error(logger).Log("err", err)
+			if logErr := level.Error(logger).Log("err", err); logErr != nil {
+				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+			}
 		} else {
 			rate := formatByteRate(uint64(size), time.Since(begin))
 
-			level.Info(logger).Log("size", size, "rate", rate)
+			if logErr := level.Info(logger).Log("size", size, "rate", rate); logErr != nil {
+				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+			}
 		}
 	}()
 
 	if cw != nil {
-		go s.fetch(cw, oid, url, size, header)
+		go func() {
+			if err := s.fetch(cw, oid, url, size, header); err != nil {
+				if logErr := level.Error(s.logger).Log("event", "fetching", "oid", oid, "err", err); logErr != nil {
+					fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+				}
+			}
+		}()
 	}
 
 	defer cr.Close()
@@ -400,7 +420,9 @@ func (s *Server) parseHeaders(r *http.Request) (url string, size int, header htt
 }
 
 func (s *Server) fetch(w io.Writer, oid, url string, size int, header http.Header) (err error) {
-	level.Info(s.logger).Log("event", "fetching", "oid", oid)
+	if logErr := level.Info(s.logger).Log("event", "fetching", "oid", oid); logErr != nil {
+		return logErr
+	}
 
 	hcw := &hashCountWriter{
 		h: sha256.New(),
@@ -414,9 +436,13 @@ func (s *Server) fetch(w io.Writer, oid, url string, size int, header http.Heade
 
 		logger := log.With(s.logger, "event", "fetched", "oid", oid, "took", time.Since(begin), "downloaded", fmt.Sprintf("%d/%d", hcw.n, size), "rate", rate)
 		if err != nil {
-			level.Error(logger).Log("err", err)
+			if logErr := level.Error(logger).Log("err", err); logErr != nil {
+				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+			}
 		} else {
-			level.Info(logger).Log()
+			if logErr := level.Info(logger).Log(); logErr != nil {
+				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+			}
 		}
 
 		err := s.cache.Done(oid, err)

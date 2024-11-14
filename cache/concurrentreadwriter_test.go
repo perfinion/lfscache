@@ -54,7 +54,8 @@ func TestConcurrentReadWriter(t *testing.T) {
 
 	for i := 0; i < 256; i++ {
 		time.Sleep(time.Millisecond)
-		crw.Write([]byte{byte(i)})
+		_, err := crw.Write([]byte{byte(i)})
+		require.NoError(t, err)
 	}
 	crw.Close()
 }

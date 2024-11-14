@@ -12,8 +12,8 @@ import (
 
 	"github.com/saracen/lfscache/server"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 )
 
 var (
@@ -52,7 +52,9 @@ func main() {
 		err = errors.New("unsupported LFS server URL")
 	}
 	if err != nil {
-		level.Error(logger).Log("err", err)
+		if logErr := level.Error(logger).Log("err", err); logErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
+		}
 		os.Exit(1)
 	}
 
@@ -72,7 +74,9 @@ func main() {
 
 	var wg sync.WaitGroup
 	if *httpAddr != "" {
-		level.Info(logger).Log("event", "listening", "proxy-endpoint", addr.String(), "transport", "HTTP", "addr", *httpAddr)
+		if logErr := level.Info(logger).Log("event", "listening", "proxy-endpoint", addr.String(), "transport", "HTTP", "addr", *httpAddr); logErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to log info: %v\n", logErr)
+		}
 
 		wg.Add(1)
 		go func() {
@@ -97,7 +101,9 @@ func main() {
 	}
 
 	if httpsEnabled {
-		level.Info(logger).Log("event", "listening", "proxy-endpoint", addr.String(), "transport", "HTTPS", "addr", *httpsAddr)
+		if logErr := level.Info(logger).Log("event", "listening", "proxy-endpoint", addr.String(), "transport", "HTTPS", "addr", *httpsAddr); logErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to log info: %v\n", logErr)
+		}
 
 		wg.Add(1)
 		go func() {
