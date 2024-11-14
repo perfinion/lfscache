@@ -2,7 +2,6 @@ package cache
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -12,7 +11,7 @@ import (
 )
 
 func TestConcurrentReadWriter(t *testing.T) {
-	f, err := ioutil.TempFile("", "")
+	f, err := os.CreateTemp("", "")
 	require.NoError(t, err)
 	defer os.Remove(f.Name())
 	defer f.Close()

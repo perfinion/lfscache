@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/ioutil"
 	"math"
 	"net"
 	"net/http"
@@ -301,7 +300,7 @@ func (s *Server) batchResponse(br *BatchResponse, compress bool, r *http.Respons
 		return err
 	}
 
-	r.Body = ioutil.NopCloser(buf)
+	r.Body = io.NopCloser(buf)
 	r.ContentLength = int64(buf.Len())
 	r.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
 

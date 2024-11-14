@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,7 +42,7 @@ func server() (*httptest.Server, *Server, string, error) {
 		}
 	}))
 
-	dir, err := ioutil.TempDir("", "")
+	dir, err := os.MkdirTemp("", "")
 	if err != nil {
 		return ts, nil, dir, err
 	}
@@ -63,7 +63,7 @@ func TestProxy(t *testing.T) {
 	req := httptest.NewRequest("POST", ts.URL+"/anything", nil)
 	s.Handle().ServeHTTP(w, req)
 
-	body, _ := ioutil.ReadAll(w.Body)
+	body, _ := io.ReadAll(w.Body)
 	assert.Equal(t, body, []byte("upstream"))
 }
 
@@ -93,6 +93,6 @@ func TestBatch(t *testing.T) {
 	}
 	s.Handle().ServeHTTP(w, req)
 
-	body, _ := ioutil.ReadAll(w.Body)
+	body, _ := io.ReadAll(w.Body)
 	assert.Equal(t, body, []byte("upstream"))
 }
