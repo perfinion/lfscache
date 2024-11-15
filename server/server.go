@@ -213,7 +213,7 @@ func (s *Server) batch() *httputil.ReverseProxy {
 	proxy.ModifyResponse = func(r *http.Response) error {
 		if r.StatusCode != http.StatusOK {
 			if logErr := level.Error(s.logger).Log("event", "proxying", "request", r.Request.URL, "err", fmt.Sprintf("remote server responded with %d status code", r.StatusCode)); logErr != nil {
-				return logErr
+				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
 			}
 			return nil
 		}
@@ -421,7 +421,7 @@ func (s *Server) parseHeaders(r *http.Request) (url string, size int, header htt
 
 func (s *Server) fetch(w io.Writer, oid, url string, size int, header http.Header) (err error) {
 	if logErr := level.Info(s.logger).Log("event", "fetching", "oid", oid); logErr != nil {
-		return logErr
+		fmt.Fprintf(os.Stderr, "failed to log info: %v\n", logErr)
 	}
 
 	hcw := &hashCountWriter{
