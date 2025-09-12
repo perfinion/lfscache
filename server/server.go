@@ -99,6 +99,7 @@ func DefaultObjectBatchActionURLRewriter(href *url.URL) *url.URL {
 type Server struct {
 	logger   log.Logger
 	upstream *url.URL
+	upBearer string
 	mux      *http.ServeMux
 	cache    *cache.FilesystemCache
 	client   *http.Client
@@ -142,6 +143,7 @@ func newServer(logger log.Logger, upstream, directory string, cacheEnabled bool)
 				ExpectContinueTimeout: 1 * time.Second,
 			},
 		},
+		upBearer: os.Getenv("UPSTREAM_AUTHORIZATION"),
 		ObjectBatchActionURLRewriter: DefaultObjectBatchActionURLRewriter,
 	}
 
@@ -193,6 +195,10 @@ func (s *Server) proxy() *httputil.ReverseProxy {
 		req.URL.Path = strings.TrimLeft(req.URL.Path, "/")
 		req.URL = s.upstream.ResolveReference(req.URL)
 		req.Host = req.URL.Host
+
+		if req.Host == s.upstream.Host && strings.HasPrefix(req.URL.Path, s.upstream.Path) && s.upBearer != "" {
+			req.Header.Set("Authorization", s.upBearer)
+		}
 
 		if _, ok := req.Header["User-Agent"]; !ok {
 			req.Header.Set("User-Agent", "")
