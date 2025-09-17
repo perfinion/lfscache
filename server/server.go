@@ -27,6 +27,9 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/saracen/lfscache/cache"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // BatchResponse represents a batch response payload.
@@ -168,6 +171,7 @@ func newServer(logger log.Logger, upstream, directory string, cacheEnabled bool)
 		s.mux.Handle(ContentCachePathPrefix, s.nocache())
 	}
 	s.mux.Handle("/health", s.healthHandler())
+	s.mux.Handle("/metrics", promhttp.Handler())
 	s.mux.Handle("/objects/batch", s.batch())
 	s.mux.Handle("/", s.proxy())
 
