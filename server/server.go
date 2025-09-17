@@ -26,10 +26,10 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/saracen/lfscache/cache"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/saracen/lfscache/cache"
 )
 
 // BatchResponse represents a batch response payload.
@@ -121,6 +121,61 @@ func NewNoCache(logger log.Logger, upstream string) (*Server, error) {
 	return newServer(logger, upstream, "", false)
 }
 
+var (
+	inFlightGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "lfscache",
+		Subsystem: "http",
+		Name:      "in_flight_requests",
+		Help:      "Requests currently being served.",
+	})
+
+	counter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lfscache",
+			Subsystem: "http",
+			Name:      "requests_total",
+			Help:      "A counter for requests by HTTP method, code.",
+		},
+		[]string{"code", "method"},
+	)
+
+	// duration is partitioned by the HTTP method and handler. It uses custom
+	// buckets based on the expected request duration.
+	duration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lfscache",
+			Subsystem: "http",
+			Name:      "request_duration_seconds",
+			Help:      "A histogram of latencies for requests.",
+			Buckets:   []float64{.25, .5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000},
+		},
+		[]string{"handler", "method"},
+	)
+
+	// responseSize has no labels, making it a zero-dimensional
+	// ObserverVec.
+	responseSize = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lfscache",
+			Subsystem: "http",
+			Name:      "response_size_bytes",
+			Help:      "A histogram of response sizes for requests.",
+			Buckets:   prometheus.ExponentialBuckets(64, 4, 12),
+		},
+		[]string{},
+	)
+)
+
+func wrapHandler(name string, handler http.Handler) http.Handler {
+	return promhttp.InstrumentHandlerInFlight(inFlightGauge,
+		promhttp.InstrumentHandlerDuration(duration.MustCurryWith(prometheus.Labels{"handler": name}),
+			promhttp.InstrumentHandlerCounter(counter,
+				promhttp.InstrumentHandlerResponseSize(responseSize, handler),
+			),
+		),
+	)
+}
+
 func newServer(logger log.Logger, upstream, directory string, cacheEnabled bool) (*Server, error) {
 	var fs *cache.FilesystemCache
 	var err error
@@ -146,7 +201,7 @@ func newServer(logger log.Logger, upstream, directory string, cacheEnabled bool)
 				ExpectContinueTimeout: 1 * time.Second,
 			},
 		},
-		upBearer: os.Getenv("UPSTREAM_AUTHORIZATION"),
+		upBearer:                     os.Getenv("UPSTREAM_AUTHORIZATION"),
 		ObjectBatchActionURLRewriter: DefaultObjectBatchActionURLRewriter,
 	}
 
@@ -166,14 +221,14 @@ func newServer(logger log.Logger, upstream, directory string, cacheEnabled bool)
 
 	s.mux = http.NewServeMux()
 	if s.cache != nil {
-		s.mux.HandleFunc(ContentCachePathPrefix, s.serve)
+		s.mux.Handle(ContentCachePathPrefix, wrapHandler("serve", http.HandlerFunc(s.serve)))
 	} else {
-		s.mux.Handle(ContentCachePathPrefix, s.nocache())
+		s.mux.Handle(ContentCachePathPrefix, wrapHandler("nocache", s.nocache()))
 	}
-	s.mux.Handle("/health", s.healthHandler())
+	s.mux.Handle("/health", wrapHandler("health", s.healthHandler()))
 	s.mux.Handle("/metrics", promhttp.Handler())
-	s.mux.Handle("/objects/batch", s.batch())
-	s.mux.Handle("/", s.proxy())
+	s.mux.Handle("/objects/batch", wrapHandler("batch", s.batch()))
+	s.mux.Handle("/", wrapHandler("proxy", s.proxy()))
 
 	return s, nil
 }
@@ -368,13 +423,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
 	}
 	defer func() {
-		logger := log.With(s.logger, "event", "served", "oid", oid, "source", source, "took", time.Since(begin))
+		took := time.Since(begin)
+		logger := log.With(s.logger, "event", "served", "oid", oid, "source", source, "took", took)
 		if err != nil {
 			if logErr := level.Error(logger).Log("err", err); logErr != nil {
 				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
 			}
 		} else {
-			rate := formatByteRate(uint64(size), time.Since(begin))
+			rate := formatByteRate(uint64(size), took)
 
 			if logErr := level.Info(logger).Log("size", size, "rate", rate); logErr != nil {
 				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
