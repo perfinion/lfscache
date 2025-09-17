@@ -160,9 +160,73 @@ var (
 			Subsystem: "http",
 			Name:      "response_size_bytes",
 			Help:      "A histogram of response sizes for requests.",
-			Buckets:   prometheus.ExponentialBuckets(64, 4, 12),
+			Buckets:   prometheus.ExponentialBuckets(64, 4, 13),
 		},
 		[]string{},
+	)
+
+	// sourceServedSize is partitioned by the cache source (disk, fresh, inflight)
+	cacheCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lfscache",
+			Subsystem: "cache",
+			Name:      "lfs_blob_cache_get",
+			Help:      "A counter of cache get sources.",
+		},
+		[]string{"source"},
+	)
+
+	// sourceServedSize is partitioned by the cache source (disk, fresh, inflight)
+	sourceServedSize = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lfscache",
+			Subsystem: "served",
+			Name:      "lfs_blob_size_bytes",
+			Help:      "A histogram of served LFS blob sizes in bytes by source.",
+			Buckets:   prometheus.ExponentialBuckets(64, 4, 13),
+		},
+		[]string{"source"},
+	)
+
+	// sourceServedDuration is partitioned by the cache source (disk, fresh, inflight)
+	sourceServedDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lfscache",
+			Subsystem: "served",
+			Name:      "lfs_blob_duration_seconds",
+			Help:      "A histogram of duration serving LFS blobs in seconds by source.",
+			Buckets:   []float64{.25, .5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000},
+		},
+		[]string{"source"},
+	)
+
+	fetchInFlight = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "lfscache",
+		Subsystem: "fetch",
+		Name:      "in_flight_requests",
+		Help:      "Requests currently being fetched.",
+	})
+
+	// fetchSize has no labels
+	fetchSize = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "lfscache",
+			Subsystem: "fetch",
+			Name:      "lfs_blob_size_bytes",
+			Help:      "A histogram of served LFS blob sizes in bytes.",
+			Buckets:   prometheus.ExponentialBuckets(64, 4, 13),
+		},
+	)
+
+	// fetchDuration has no labels
+	fetchDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "lfscache",
+			Subsystem: "fetch",
+			Name:      "lfs_blob_duration_seconds",
+			Help:      "A histogram of duration fetching LFS blobs in seconds.",
+			Buckets:   []float64{.25, .5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000},
+		},
 	)
 )
 
@@ -419,11 +483,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cacheCounter.With(prometheus.Labels{"source": string(source)}).Inc()
+	sourceServedSize.With(prometheus.Labels{"source": string(source)}).Observe(float64(size))
 	if logErr := level.Info(s.logger).Log("event", "serving", "oid", oid, "source", source); logErr != nil {
 		fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
 	}
 	defer func() {
 		took := time.Since(begin)
+		sourceServedDuration.With(prometheus.Labels{"source": string(source)}).Observe(took.Seconds())
 		logger := log.With(s.logger, "event", "served", "oid", oid, "source", source, "took", took)
 		if err != nil {
 			if logErr := level.Error(logger).Log("err", err); logErr != nil {
@@ -495,12 +562,17 @@ func (s *Server) fetch(w io.Writer, oid, url string, size int, header http.Heade
 		w: w,
 	}
 
+	fetchInFlight.Inc()
 	begin := time.Now()
 	var beginTransfer time.Time
 	defer func() {
+		took := time.Since(begin)
 		rate := formatByteRate(uint64(hcw.n), time.Since(beginTransfer))
 
-		logger := log.With(s.logger, "event", "fetched", "oid", oid, "took", time.Since(begin), "downloaded", fmt.Sprintf("%d/%d", hcw.n, size), "rate", rate)
+		fetchSize.Observe(float64(hcw.n))
+		fetchDuration.Observe(took.Seconds())
+		fetchInFlight.Dec()
+		logger := log.With(s.logger, "event", "fetched", "oid", oid, "took", took, "downloaded", fmt.Sprintf("%d/%d", hcw.n, size), "rate", rate)
 		if err != nil {
 			if logErr := level.Error(logger).Log("err", err); logErr != nil {
 				fmt.Fprintf(os.Stderr, "failed to log error: %v\n", logErr)
